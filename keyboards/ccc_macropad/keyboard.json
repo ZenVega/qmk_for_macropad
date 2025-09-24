@@ -1,8 +1,9 @@
 {
+  "processor": "RP2040",
+  "bootloader": "rp2040",
   "manufacturer": "zen_vega",
   "keyboard_name": "ccc_macropad",
   "maintainer": "zen_vega",
-  "development_board": "promicro_rp2040",
   "diode_direction": "COL2ROW",
   "features": {
     "bootmagic": true,
@@ -14,6 +15,9 @@
   "matrix_pins": {
     "rows": ["GP0", "GP1"],
     "cols": ["GP2", "GP3", "GP4"]
+  },
+  "drivers": {
+    "analog": "pal"
   },
   "analog": {
     "pins": ["GP26"]
