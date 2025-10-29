@@ -1,16 +1,22 @@
 // Copyright 2023 QMK
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
+
 #include "analog.h"
 #include QMK_KEYBOARD_H
 
-/*
-slider setup
+
+//-----
+// slider setup
+//-----
 #define SLIDER_PIN 26
 #define SLIDER_SENSITIVITY 12
+static bool volume_initialized = false;
+static int16_t last_val = 0;
+#define MAX_VOLUME_STEPS 100
 
-static int16_t last_val = -1;
-*/
+//static int16_t last_val = -1;
+
 //----------
 // LEDs
 //----------
@@ -34,6 +40,14 @@ enum custom_keys {
     KC_MOVE_LEFT,
     KC_MOVE_RIGHT
 };
+
+static inline int16_t smooth(int16_t new_val)
+{
+    static int32_t filtered = 0;
+    filtered = (filtered * 9 + new_val) / 10; // 90% old, 10% new
+    return (int16_t)filtered;
+}
+
 
 // ----------------------
 // Keymap
@@ -71,7 +85,17 @@ void matrix_init_user(void)
     setPinOutput(LED2_PIN);
     setPinOutput(LED3_PIN); 
     
-     // initial happy blinking
+    //initialize volume
+    if (!volume_initialized)
+    {
+        // set volume to zero
+        for (int i = 0; i < 50; i++) 
+            tap_code(KC_VOLD);
+        volume_initialized = true;
+        last_val = 0;
+    }
+
+    // initial happy blinking
     int i = 0;
     while (i < 10)
     {
@@ -130,11 +154,57 @@ layer_state_t layer_state_set_user(layer_state_t state)
 // ----------------------
 void matrix_scan_user(void) 
 {
+    //OS_Switch
     bool new_mode = !readPin(OS_SWITCH_PIN); // HIGH = macOS, LOW = Linux
     if (new_mode != is_mac) 
     {
         is_mac = new_mode;
     }
+
+    if(!volume_initialized)
+        return;
+    //Slider
+    // --- Slider read + smoothing ---
+    static float filtered = 0; // keep as float for smooth averaging
+    int16_t raw = analogReadPin(SLIDER_PIN);
+
+    // Exponential moving average filter
+    filtered = filtered * 0.9f + raw * 0.1f;
+
+    // Map to 0..MAX_VOLUME_STEPS
+    int target = (int)(filtered * MAX_VOLUME_STEPS / 4095.0f);
+
+    // Clamp edges to ensure full range
+    if (target < 0) target = 0;
+    if (target > MAX_VOLUME_STEPS) target = MAX_VOLUME_STEPS;
+
+    // --- Apply volume changes ---
+    if (target != last_val) {
+        if (target > last_val) {
+            for (int i = last_val; i < target; i++)
+                tap_code(KC_VOLU);
+        } else {
+            for (int i = target; i < last_val; i++)
+                tap_code(KC_VOLD);
+        }
+        last_val = target;
+    }
+    
+    
+    /*
+    // Map to a smaller range so it’s not too sensitive
+    int16_t step = slider_val / SLIDER_SENSITIVITY;
+
+    // compare with last value and call (VOLUME_UP/VOLUME_DOWN) on change;
+    if (step != last_val) {
+        if (step > last_val) {
+            tap_code(KC_VOLU);
+        } else {
+            tap_code(KC_VOLD);
+        }
+        last_val = step;
+    }
+    */
 }
 
 // ----------------------
@@ -149,16 +219,16 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record)
     switch (keycode) 
     {
         case KC_WS_LEFT:
-            tap_code16(is_mac ? KC_1 : LGUI(LALT(KC_LEFT)));
+            tap_code16(is_mac ? LCTL(KC_LEFT) : LGUI(LALT(KC_LEFT)));
             return false;
         case KC_WS_RIGHT:
-            tap_code16(is_mac ? KC_2 : LGUI(LALT(KC_RIGHT)));
+            tap_code16(is_mac ? LCTL(KC_RIGHT) : LGUI(LALT(KC_RIGHT)));
             return false;
         case KC_MOVE_LEFT:
-            tap_code16(is_mac ? KC_A : LGUI(LSFT(LALT(KC_LEFT))));
+            tap_code16(is_mac ? LCTL(LSFT(KC_LEFT)) : LGUI(LSFT(LALT(KC_LEFT))));
             return false;
         case KC_MOVE_RIGHT:
-            tap_code16(is_mac ? KC_B : LGUI(LSFT(LALT(KC_RIGHT))));
+            tap_code16(is_mac ? LCTL(LSFT(KC_RIGHT)) : LGUI(LSFT(LALT(KC_RIGHT))));
             return false;
     }
     return true;
