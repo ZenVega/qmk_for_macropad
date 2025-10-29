@@ -11,9 +11,13 @@ slider setup
 
 static int16_t last_val = -1;
 */
+//----------
+// LEDs
+//----------
 
-/*OS Switch setup*/
-#include QMK_KEYBOARD_H
+#define LED1_PIN 29 //left LED
+#define LED2_PIN 27
+#define LED3_PIN 28 //right LED
 
 // ----------------------
 // OS Switch
@@ -54,36 +58,96 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         LGUI(KC_TAB), LGUI(LSFT(KC_TAB))
     )
 };
-
-// ----------------------
-// Initialize OS switch pin
-// ----------------------
+//--------------------
+//called once at boot
+//--------------------
 void matrix_init_user(void) 
 {
-    setPinInputHigh(OS_SWITCH_PIN); // enable internal pull-up
+    //Initialize OS Switch
+    setPinInputHigh(OS_SWITCH_PIN);
+
+    // Initialize LEDs
+    setPinOutput(LED1_PIN);
+    setPinOutput(LED2_PIN);
+    setPinOutput(LED3_PIN); 
+    
+     // initial happy blinking
+    int i = 0;
+    while (i < 10)
+    {
+        writePinHigh(LED1_PIN);
+        writePinLow(LED2_PIN);
+        writePinHigh(LED3_PIN);
+        wait_ms(200);
+        writePinLow(LED1_PIN);
+        writePinHigh(LED2_PIN);
+        writePinLow(LED3_PIN);
+        wait_ms(200);
+        i++;
+    }
+    writePinLow(LED2_PIN);
 }
 
+// --------------------------
+// called once after boot is done
+// -------------------------
+void post_init_user(void)
+{
+    /*
+        to have the intial blinking here does not work,
+        checking out the layer state seems to immediately start after boot
+    */
+}
+//-----------
+// called when layer changes
+// --------------
+layer_state_t layer_state_set_user(layer_state_t state) 
+{
+    uint8_t layer = get_highest_layer(state);
+
+    writePinLow(LED1_PIN);
+    writePinLow(LED2_PIN);
+    writePinLow(LED3_PIN);
+
+    switch(layer) 
+    {
+        case 0: 
+            writePinHigh(LED1_PIN); 
+            break;
+        case 1: 
+            writePinHigh(LED2_PIN);
+            break;
+        case 2:
+            writePinHigh(LED3_PIN);
+            break;
+    }
+    return state;
+}
+
+
 // ----------------------
-// Scan OS switch every cycle
+// repeated loop, constantly called while running
 // ----------------------
 void matrix_scan_user(void) 
 {
     bool new_mode = !readPin(OS_SWITCH_PIN); // HIGH = macOS, LOW = Linux
-    if (new_mode != is_mac) {
+    if (new_mode != is_mac) 
+    {
         is_mac = new_mode;
-        // Optional: add LED or debug feedback
-        uprintf("OS Mode: %s\n", is_mac ? "macOS" : "Linux");
     }
 }
 
 // ----------------------
-// Process custom keys
+// Called on every keypress - Process custom keys
 // ----------------------
 bool process_record_user(uint16_t keycode, keyrecord_t *record) 
 {
-    if (!record->event.pressed) return true; // only on press
-
-    switch (keycode) {
+    //if nothing is pressed, there is no decision to be made
+    if (!record->event.pressed) 
+        return true;
+    //if pressed, decide what the meaning of the pressed keys should be
+    switch (keycode) 
+    {
         case KC_WS_LEFT:
             tap_code16(is_mac ? KC_1 : LGUI(LALT(KC_LEFT)));
             return false;
