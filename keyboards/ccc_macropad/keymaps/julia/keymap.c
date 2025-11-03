@@ -62,14 +62,20 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
     /* Layer 1: Move window between workspaces */
     [1] = LAYOUT(
-        MO(1), MO(2),
+        _______, MO(2),                         // "_______" describes a transparent key 
         KC_MOVE_LEFT, KC_MOVE_RIGHT
     ),
 
     /* Layer 2: Switch windows */
     [2] = LAYOUT(
-        MO(1), MO(2),
+        MO(1),_______,
         LGUI(KC_TAB), LGUI(LSFT(KC_TAB))
+    ),
+
+    /* Layer 3: sleep*/
+    [3] = LAYOUT(
+        _______, _______,
+        KC_SYSTEM_SLEEP, KC_SYSTEM_SLEEP
     )
 };
 
@@ -129,6 +135,8 @@ void post_init_user(void)
 // --------------
 layer_state_t layer_state_set_user(layer_state_t state) 
 {
+    state = update_tri_layer_state(state, 1, 2, 3);
+
     uint8_t layer = get_highest_layer(state);
 
     writePinLow(LED1_PIN);
@@ -146,8 +154,14 @@ layer_state_t layer_state_set_user(layer_state_t state)
         case 2:
             writePinHigh(LED3_PIN);
             break;
+        case 3:
+            writePinHigh(LED1_PIN);
+            writePinHigh(LED2_PIN);
+            writePinHigh(LED3_PIN);
+            break;
+
     }
-    return state;
+    return (state);
 }
 
 
@@ -201,6 +215,23 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record)
     //if nothing is pressed, there is no decision to be made
     if (!record->event.pressed) 
         return true;
+    
+    if (record->event.pressed) {
+        if (keycode == KC_SYSTEM_SLEEP) {
+            // sleep animation
+            for (uint8_t i = 0; i < 5; i++) {
+                writePinHigh(LED1_PIN);
+                writePinHigh(LED2_PIN);
+                writePinHigh(LED3_PIN);
+                wait_ms(200);
+
+                writePinLow(LED1_PIN);
+                writePinLow(LED2_PIN);
+                writePinLow(LED3_PIN);
+                wait_ms(200);
+            }
+        }
+    }
 
     //if pressed, decide what the meaning of the pressed keys should be
     switch (keycode) 
@@ -218,6 +249,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record)
             tap_code16(is_mac ? LCTL(LSFT(KC_RIGHT)) : LGUI(LSFT(LALT(KC_RIGHT))));
             return false;
     }
+
     return true;
 }
 
