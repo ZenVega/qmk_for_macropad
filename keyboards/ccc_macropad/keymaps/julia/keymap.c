@@ -1,26 +1,24 @@
 // Copyright 2023 QMK
 // SPDX-License-Identifier: GPL-2.0-or-later
-//
 
 #include "analog.h"
 #include QMK_KEYBOARD_H
 
-
-//-----
+// ----------------------
 // slider setup
-//-----
+// ----------------------
 #define SLIDER_PIN 26
-#define SLIDER_SENSITIVITY 12
-static bool volume_initialized = false;
-static int16_t last_val = 0;
 #define MAX_VOLUME_STEPS 100
+#define SLIDER_DEADBAND 2     // ignore <2 steps of change
+static bool volume_init_done = false;
+static bool slider_ready = false;
+static uint32_t slider_timer = 0;
+static uint32_t init_timer = 0;
+static int16_t last_val = 0;
 
-//static int16_t last_val = -1;
-
-//----------
+// ----------------------
 // LEDs
-//----------
-
+// ----------------------
 #define LED1_PIN 29 //left LED
 #define LED2_PIN 27
 #define LED3_PIN 28 //right LED
@@ -32,6 +30,13 @@ static int16_t last_val = 0;
 static bool is_mac = false;
 
 // ----------------------
+// helpers to hold tab
+// ----------------------
+static bool gui_held = false;
+static uint32_t last_tab_time = 0;
+#define GUI_HOLD_TIMEOUT 1000 // ms
+
+// ----------------------
 // Custom keycodes
 // ----------------------
 enum custom_keys {
@@ -40,13 +45,6 @@ enum custom_keys {
     KC_MOVE_LEFT,
     KC_MOVE_RIGHT
 };
-
-static inline int16_t smooth(int16_t new_val)
-{
-    static int32_t filtered = 0;
-    filtered = (filtered * 9 + new_val) / 10; // 90% old, 10% new
-    return (int16_t)filtered;
-}
 
 
 // ----------------------
@@ -79,9 +77,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     )
 };
 
-//--------------------
+// ----------------------
 //called once at boot
-//--------------------
+// ----------------------
 void matrix_init_user(void) 
 {
     //Initialize OS Switch
@@ -92,16 +90,6 @@ void matrix_init_user(void)
     setPinOutput(LED2_PIN);
     setPinOutput(LED3_PIN); 
     
-    //initialize volume
-    if (!volume_initialized)
-    {
-        // set volume to zero
-        for (int i = 0; i < 50; i++) 
-            tap_code(KC_VOLD);
-        volume_initialized = true;
-        last_val = 0;
-    }
-
     // initial happy blinking
     int i = 0;
     while (i < 10)
@@ -119,14 +107,14 @@ void matrix_init_user(void)
     writePinLow(LED2_PIN);
 }
 
-// --------------------------
+// ----------------------
 // called once after boot is done
-// -------------------------
+// ----------------------
 void post_init_user(void)
 {
     /*
         to have the intial blinking here does not work,
-        checking out the layer state seems to immediately start after boot
+        checking out the layer state immediately starts after boot
     */
 }
 
@@ -168,43 +156,63 @@ layer_state_t layer_state_set_user(layer_state_t state)
 // ----------------------
 // repeated loop, constantly called while running
 // ----------------------
-void matrix_scan_user(void) 
-{
+void matrix_scan_user(void) {
+
     // ------ OS_Switch -------- //
     bool new_mode = !readPin(OS_SWITCH_PIN); // HIGH = macOS, LOW = Linux
-    if (new_mode != is_mac) 
-    {
+    if (new_mode != is_mac) {
         is_mac = new_mode;
     }
-
-    // ----- Slider ------ //
-    if (!volume_initialized)
-        return;
     
+    // ------ hold tab for a while after pressed -------- //
+    if (gui_held && timer_elapsed32(last_tab_time) > GUI_HOLD_TIMEOUT) {
+        unregister_mods(MOD_BIT(KC_LGUI));
+        gui_held = false;
+    }
+
+    // ------ volume init -------- //
+    if (!volume_init_done) {
+        if (!init_timer) {
+            init_timer = timer_read32();
+        }
+        if (timer_elapsed32(init_timer) > 800) {
+            for (int i = 0; i < 50; i++) {
+                tap_code_delay(KC_VOLD, 5);
+            }
+            last_val = 0;
+            volume_init_done = true;
+            slider_timer = timer_read32(); 
+        }
+        return;
+    }
+
+    // ------ start slider delayed -------- //
+    if (!slider_ready) {
+        if (timer_elapsed32(slider_timer) > 500) {
+            slider_ready = true;
+        } else {
+            return;
+        }
+    }
+
+    // ------ slider processing -------- //    
     int16_t raw = analogReadPin(SLIDER_PIN);
     int target = (int)(raw * MAX_VOLUME_STEPS / 4095.0f);
 
-    // cut of edges
-    if (target < 0) 
-        target = 0;
-    if (target > MAX_VOLUME_STEPS) 
-        target = MAX_VOLUME_STEPS;
+    if (target < 0) target = 0;
+    if (target > MAX_VOLUME_STEPS) target = MAX_VOLUME_STEPS;
 
-    // --- Apply volume changes ---
-    if (target != last_val)
-    {
-        if (target > last_val) 
-        {
-            for (int i = last_val; i < target; i++)
-                tap_code(KC_VOLU);
-        } 
-        else 
-        {
-            for (int i = target; i < last_val; i++)
-                tap_code(KC_VOLD);
-        }
-        last_val = target;
+    if (abs(target - last_val) <= SLIDER_DEADBAND) return; //noise filter
+
+    if (target > last_val) {
+        for (int i = last_val; i < target; i++)
+            tap_code(KC_AUDIO_VOL_UP);
+    } else {
+        for (int i = target; i < last_val; i++)
+            tap_code(KC_AUDIO_VOL_DOWN);
     }
+
+    last_val = target;
 }
 
 // ----------------------
@@ -212,7 +220,6 @@ void matrix_scan_user(void)
 // ----------------------
 bool process_record_user(uint16_t keycode, keyrecord_t *record) 
 {
-    //if nothing is pressed, there is no decision to be made
     if (!record->event.pressed) 
         return true;
     
@@ -233,23 +240,48 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record)
         }
     }
 
-    //if pressed, decide what the meaning of the pressed keys should be
-    switch (keycode) 
-    {
+    switch (keycode) {
         case KC_WS_LEFT:
-            tap_code16(is_mac ? LCTL(KC_LEFT) : LGUI(LALT(KC_LEFT)));
+            tap_code16(is_mac ? LCTL(KC_LEFT)
+                              : LGUI(LALT(KC_LEFT)));
             return false;
-        case KC_WS_RIGHT:
-            tap_code16(is_mac ? LCTL(KC_RIGHT) : LGUI(LALT(KC_RIGHT)));
-            return false;
-        case KC_MOVE_LEFT:
-            tap_code16(is_mac ? LCTL(LSFT(KC_LEFT)) : LGUI(LSFT(LALT(KC_LEFT))));
-            return false;
-        case KC_MOVE_RIGHT:
-            tap_code16(is_mac ? LCTL(LSFT(KC_RIGHT)) : LGUI(LSFT(LALT(KC_RIGHT))));
-            return false;
-    }
 
+        case KC_WS_RIGHT:
+            tap_code16(is_mac ? LCTL(KC_RIGHT)
+                              : LGUI(LALT(KC_RIGHT)));
+            return false;
+
+        case KC_MOVE_LEFT:
+            // macOS: no moving windows → fallback to switching
+            tap_code16(is_mac ? LCTL(KC_LEFT)
+                              : LGUI(LSFT(LALT(KC_LEFT))));
+            return false;
+
+        case KC_MOVE_RIGHT:
+            tap_code16(is_mac ? LCTL(KC_RIGHT)
+                              : LGUI(LSFT(LALT(KC_RIGHT))));
+            return false;
+        
+        case LGUI(KC_TAB):
+        case LGUI(LSFT(KC_TAB)):
+        {
+            if (!gui_held) {
+                register_mods(MOD_BIT(KC_LGUI)); //hold LGUI / LCMD
+                gui_held = true;
+            }
+
+            if (keycode == LGUI(KC_TAB)) {
+                tap_code(KC_TAB);        // forward
+            } else {
+                register_mods(MOD_BIT(KC_LSFT));  // hold Shift for reverse
+                tap_code(KC_TAB);
+                unregister_mods(MOD_BIT(KC_LSFT));
+            }
+
+            last_tab_time = timer_read32();
+            return false;
+        }
+    }
     return true;
 }
 
