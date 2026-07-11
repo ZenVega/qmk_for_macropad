@@ -26,6 +26,7 @@ const int16_t dead_zone = 70;
 // ----------------------
 #define LAYER_SWITCH_PIN GP0
 static bool switch_on = false;
+static bool switch_synced = false; // force a real read on first scan
 
 // ----------------------
 // helpers to hold tab
@@ -130,8 +131,9 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 void matrix_scan_user(void) {
     
     // ------ OS_Switch: select layer set ------
-    bool new_mode = !readPin(LAYER_SWITCH_PIN); 
-    if (new_mode != switch_on) {
+    bool new_mode = !readPin(LAYER_SWITCH_PIN);
+    if (!switch_synced || new_mode != switch_on) {
+        switch_synced       = true;
         switch_on           = new_mode;
         uint8_t target_base = switch_on ? BASE_LAYER_2 : BASE_LAYER_1;
         layer_move(target_base); // activate the correct base layer
