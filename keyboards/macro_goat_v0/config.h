@@ -1,0 +1,11 @@
+#pragma once
+
+#define DYNAMIC_KEYMAP_LAYER_COUNT 8
+
+// rgblight — WS2812 strip on GP29
+#define RGBLIGHT_DI_PIN GP29
+#define RGBLIGHT_LIMIT_VAL 200
+#define RGBLIGHT_HUE_STEP 8
+#define RGBLIGHT_SAT_STEP 17
+#define RGBLIGHT_VAL_STEP 17
+#define RGBLIGHT_SLEEP
